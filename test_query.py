@@ -62,11 +62,11 @@ def save_cache(cache, cache_file):
 
 
 def find_best_match(query, model, tokenizer, data_loader, cache):
-    """Find the best matching video for the given query."""
+    """Find the top 5 matching videos for the given query."""
     text_inputs = process_query(query, tokenizer)
 
-    best_match_score = -float('inf')
-    best_match_video = None
+    all_scores = []
+    all_video_ids = []
 
     with torch.no_grad():
         # Using the correct method to encode text
@@ -109,17 +109,15 @@ def find_best_match(query, model, tokenizer, data_loader, cache):
 
             similarities = torch.matmul(text_features, video_features_tensor.t())
 
-            max_score, max_index = similarities.max(dim=1)
-            max_index = max_index.item()
+            # Flatten the similarities and get the corresponding video IDs
+            all_scores.extend(similarities.cpu().tolist())
+            all_video_ids.extend(video_ids)
 
-            if max_index < len(batch['video_id']):
-                if max_score > best_match_score:
-                    best_match_score = max_score
-                    best_match_video = batch['video_id'][max_index]
-            else:
-                print(f"Index {max_index} is out of bounds for batch['video_id'] with length {len(batch['video_id'])}")
+    # Get the top 5 scores and their corresponding video IDs
+    top_scores_indices = sorted(range(len(all_scores)), key=lambda i: all_scores[i], reverse=True)[:5]
+    top_videos = [(all_video_ids[i], all_scores[i]) for i in top_scores_indices]
 
-    return best_match_video
+    return top_videos
 
 
 def main():
@@ -146,9 +144,13 @@ def main():
     # Load existing cache or initialize new one
     cache = load_cache(cache_file)
 
-    # Find the best matching video
-    best_match_video = find_best_match(config.query, model, tokenizer, data_loader, cache)
-    print(f"The best matching video ID for the query '{config.query}' is: {best_match_video}")
+    # Find the top 5 matching videos
+    top_videos = find_best_match(config.query, model, tokenizer, data_loader, cache)
+
+    # Display the top 5 matching videos
+    print(f"Top 5 matching videos for the query '{config.query}':")
+    for video_id, score in top_videos:
+        print(f"Video ID: {video_id}, Score: {score}")
 
     # Save the updated cache
     save_cache(cache, cache_file)
