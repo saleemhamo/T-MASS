@@ -69,14 +69,17 @@ def find_best_match(query, model, tokenizer, data_loader):
             similarities = torch.matmul(text_features, video_features.t())
 
             max_score, max_index = similarities.max(dim=1)
-            print(f"Max score: {max_score}")
-            print(f"Max index: {max_index}")
+            print(f"Max index: {max_index}")  # Debugging output
+            print(f"Batch size: {batch_size}, Num frames: {num_frames}")
 
-            if max_score > best_match_score:
-                print(f"New best match found with score {max_score.item()}")
-                print(f"Video IDs: {batch['video_id']}")
-                best_match_score = max_score
-                best_match_video = batch['video_id'][max_index]  # No .item(), since this is a string
+            # Ensure max_index is within the bounds of batch['video_id']
+            max_index = max_index.item()
+            if max_index < len(batch['video_id']):
+                if max_score > best_match_score:
+                    best_match_score = max_score
+                    best_match_video = batch['video_id'][max_index]
+            else:
+                print(f"Index {max_index} is out of bounds for batch['video_id'] with length {len(batch['video_id'])}")
 
     return best_match_video
 
