@@ -87,9 +87,21 @@ def find_best_match(query, model, tokenizer, data_loader, cache):
                 else:
                     # Calculate and cache features
                     video_data = batch['video'][idx].unsqueeze(0).cuda()
-                    _, channels, height, width = video_data.shape
+
+                    # Ensure the correct shape and number of dimensions
+                    if video_data.dim() == 5:
+                        # If video_data has shape [batch_size, num_frames, channels, height, width]
+                        _, num_frames, channels, height, width = video_data.shape
+                    elif video_data.dim() == 4:
+                        # If video_data has shape [batch_size, channels, height, width]
+                        channels, height, width = video_data.shape[1:]
+                    else:
+                        raise ValueError(f"Unexpected shape for video_data: {video_data.shape}")
+
                     if channels != 3:
                         raise ValueError(f"Expected 3 channels (RGB), but got {channels} channels.")
+
+                    # Flatten to [batch_size * num_frames, channels, height, width]
                     video_data = video_data.view(-1, channels, height, width)
                     video_features = model.clip.get_image_features(video_data)
                     cache[video_id] = video_features.cpu()  # Store the features in CPU to save memory
