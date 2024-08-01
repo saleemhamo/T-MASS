@@ -1,6 +1,5 @@
 import os
 import torch
-import argparse
 import pickle
 from transformers import CLIPTokenizer
 from model.model_factory import ModelFactory
@@ -70,7 +69,7 @@ def find_best_match(query, model, tokenizer, data_loader, cache):
     best_match_video = None
 
     with torch.no_grad():
-        # Encode text features
+        # Using the correct method to encode text
         text_features = model.clip.get_text_features(
             input_ids=text_inputs['input_ids'].cuda(),
             attention_mask=text_inputs['attention_mask'].cuda()
@@ -83,28 +82,21 @@ def find_best_match(query, model, tokenizer, data_loader, cache):
             for idx, video_id in enumerate(video_ids):
                 if video_id in cache:
                     # Use cached features
-                    video_features = cache[video_id]
+                    video_features = cache[video_id].cuda()  # Move to GPU for processing
                 else:
                     # Calculate and cache features
                     video_data = batch['video'][idx].unsqueeze(0).cuda()
-
-                    # Ensure the correct shape and number of dimensions
-                    if video_data.dim() == 5:
-                        # If video_data has shape [batch_size, num_frames, channels, height, width]
-                        _, num_frames, channels, height, width = video_data.shape
-                    elif video_data.dim() == 4:
-                        # If video_data has shape [batch_size, channels, height, width]
-                        channels, height, width = video_data.shape[1:]
-                    else:
-                        raise ValueError(f"Unexpected shape for video_data: {video_data.shape}")
+                    _, num_frames, channels, height, width = video_data.shape
 
                     if channels != 3:
                         raise ValueError(f"Expected 3 channels (RGB), but got {channels} channels.")
 
-                    # Flatten to [batch_size * num_frames, channels, height, width]
+                    # Reshape to [batch_size * num_frames, channels, height, width]
                     video_data = video_data.view(-1, channels, height, width)
                     video_features = model.clip.get_image_features(video_data)
-                    cache[video_id] = video_features.cpu()  # Store the features in CPU to save memory
+
+                    # Cache the features
+                    cache[video_id] = video_features.cpu()  # Store on CPU
 
                 video_features_list.append(video_features)
 
@@ -113,14 +105,16 @@ def find_best_match(query, model, tokenizer, data_loader, cache):
             similarities = torch.matmul(text_features, video_features_tensor.t())
 
             max_score, max_index = similarities.max(dim=1)
-            max_index = max_index.item()
+            print(f"Max index: {max_index}")  # Debugging output
+            print(f"Batch size: {batch_size}, Num frames: {num_frames}")
 
-            if max_index < len(video_ids):
+            max_index = max_index.item()
+            if max_index < len(batch['video_id']):
                 if max_score > best_match_score:
                     best_match_score = max_score
-                    best_match_video = video_ids[max_index]
+                    best_match_video = batch['video_id'][max_index]
             else:
-                print(f"Index {max_index} is out of bounds for video_ids with length {len(video_ids)}")
+                print(f"Index {max_index} is out of bounds for batch['video_id'] with length {len(batch['video_id'])}")
 
     return best_match_video
 
