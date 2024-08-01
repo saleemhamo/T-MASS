@@ -102,13 +102,16 @@ def find_best_match(query, model, tokenizer, data_loader, cache):
 
             # Stack video features and calculate similarities
             video_features_tensor = torch.stack(video_features_list).squeeze()
+
+            # If video_features_tensor is 3D, aggregate across the third dimension (frames)
+            if video_features_tensor.dim() == 3:
+                video_features_tensor = video_features_tensor.mean(dim=1)  # Averaging over frames
+
             similarities = torch.matmul(text_features, video_features_tensor.t())
 
             max_score, max_index = similarities.max(dim=1)
-            print(f"Max index: {max_index}")  # Debugging output
-            print(f"Batch size: {batch_size}, Num frames: {num_frames}")
-
             max_index = max_index.item()
+
             if max_index < len(batch['video_id']):
                 if max_score > best_match_score:
                     best_match_score = max_score
