@@ -22,7 +22,7 @@ def load_model(config):
             checkpoint_path = os.path.join(config.model_path, "model_best.pth")
         checkpoint = torch.load(checkpoint_path)
         state_dict = checkpoint.get("state_dict", checkpoint)
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=False)
         print(f"Loaded checkpoint from {checkpoint_path}")
 
     return model, tokenizer
