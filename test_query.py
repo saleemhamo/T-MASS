@@ -72,7 +72,7 @@ def find_best_match(query, model, tokenizer, data_loader):
 
             if max_score > best_match_score:
                 best_match_score = max_score
-                best_match_video = batch['video_id'][max_index].item()
+                best_match_video = batch['video_id'][max_index]  # No .item(), since this is a string
 
     return best_match_video
 
