@@ -71,6 +71,9 @@ def find_best_match(query, model, tokenizer, data_loader):
             max_score, max_index = similarities.max(dim=1)
 
             if max_score > best_match_score:
+                print(f"New best match found with score {max_score.item()}")
+                print(f"Video IDs: {batch['video_id']}")
+                print(batch)
                 best_match_score = max_score
                 best_match_video = batch['video_id'][max_index]  # No .item(), since this is a string
 
