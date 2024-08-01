@@ -68,7 +68,6 @@ class AllConfig(Config):
         parser.add_argument('--metric', type=str, default='t2v', help="'t2v'/'v2t'")
 
         # model parameters
-        # parser.add_argument('--huggingface', action='store_true', default=False)
         parser.add_argument('--arch', type=str, default='clip_transformer')
         parser.add_argument('--clip_arch', type=str, default='ViT-B/32', choices=['ViT-B/32', 'ViT-B/16'],
                             help="CLIP arch. only when not using huggingface")
@@ -125,6 +124,9 @@ class AllConfig(Config):
                             help="use which prior for the re-parameterization, default to unifrom01")
         parser.add_argument('--stochastic_prior_std', type=float, default=1.0,
                             help='std value for the reprameterization prior')
+
+        # Query parameter
+        parser.add_argument('--query', type=str, required=True, help="Text query for video retrieval")
 
         args = parser.parse_args()
 
