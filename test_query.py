@@ -69,7 +69,7 @@ def find_best_match(query, model, tokenizer, data_loader, cache):
     all_video_ids = []
 
     with torch.no_grad():
-        # Using the correct method to encode text
+        # Encode the query to text features
         text_features = model.clip.get_text_features(
             input_ids=text_inputs['input_ids'].cuda(),
             attention_mask=text_inputs['attention_mask'].cuda()
@@ -82,7 +82,7 @@ def find_best_match(query, model, tokenizer, data_loader, cache):
             for idx, video_id in enumerate(video_ids):
                 if video_id in cache:
                     # Use cached features
-                    video_features = cache[video_id].cuda()  # Move to GPU for processing
+                    video_features = cache[video_id].cuda()
                 else:
                     # Calculate and cache features
                     video_data = batch['video'][idx].unsqueeze(0).cuda()
@@ -96,7 +96,7 @@ def find_best_match(query, model, tokenizer, data_loader, cache):
                     video_features = model.clip.get_image_features(video_data)
 
                     # Cache the features
-                    cache[video_id] = video_features.cpu()  # Store on CPU
+                    cache[video_id] = video_features.cpu()
 
                 video_features_list.append(video_features)
 
@@ -105,12 +105,14 @@ def find_best_match(query, model, tokenizer, data_loader, cache):
 
             # If video_features_tensor is 3D, aggregate across the third dimension (frames)
             if video_features_tensor.dim() == 3:
-                video_features_tensor = video_features_tensor.mean(dim=1)  # Averaging over frames
+                video_features_tensor = video_features_tensor.mean(dim=1)
 
+            # Calculate similarities and aggregate into a single score per video
             similarities = torch.matmul(text_features, video_features_tensor.t())
 
-            # Flatten the similarities and get the corresponding video IDs
-            all_scores.extend(similarities.cpu().tolist())
+            # Get the mean score for each video
+            video_scores = similarities.mean(dim=1).cpu().tolist()
+            all_scores.extend(video_scores)
             all_video_ids.extend(video_ids)
 
     # Get the top 5 scores and their corresponding video IDs
