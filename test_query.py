@@ -54,7 +54,14 @@ def find_best_match(query, model, tokenizer, data_loader):
 
         for batch in data_loader:
             video_features = batch['video'].cuda()
-            video_features = video_features.view(video_features.size(0), -1, 512)
+            batch_size, num_frames, channels, height, width = video_features.shape
+
+            # Reshape video frames to the expected format: [batch_size * num_frames, channels, height, width]
+            video_features = video_features.view(batch_size * num_frames, channels, height, width)
+
+            # Ensure the channels are correct (3 for RGB images)
+            if channels != 3:
+                raise ValueError(f"Expected 3 channels (RGB), but got {channels} channels.")
 
             # Using the correct method to encode video
             video_features = model.clip.get_image_features(video_features)
