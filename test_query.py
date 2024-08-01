@@ -48,13 +48,16 @@ def find_best_match(query, model, tokenizer, data_loader):
     best_match_video = None
 
     with torch.no_grad():
-        text_features = model.encode_text(text_inputs['input_ids'].cuda())
+        # Using the correct method to encode text
+        text_features = model.clip.get_text_features(input_ids=text_inputs['input_ids'].cuda(),
+                                                     attention_mask=text_inputs['attention_mask'].cuda())
 
         for batch in data_loader:
             video_features = batch['video'].cuda()
             video_features = video_features.view(video_features.size(0), -1, 512)
 
-            video_features = model.encode_video(video_features)
+            # Using the correct method to encode video
+            video_features = model.clip.get_image_features(video_features)
 
             similarities = torch.matmul(text_features, video_features.t())
 
