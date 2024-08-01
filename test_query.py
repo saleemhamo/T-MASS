@@ -12,9 +12,17 @@ from datasets.model_transforms import init_transform_dict
 def load_model(config):
     """Load the trained model and tokenizer."""
     model = ModelFactory.get_model(config)
-    model.load_state_dict(torch.load(os.path.join(config.model_path, f"model_best.pth")))
-    model.eval()
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32", TOKENIZERS_PARALLELISM=False)
+
+    if config.load_epoch is not None:
+        checkpoint_path = os.path.join(config.model_path, f"checkpoint-epoch{config.load_epoch}.pth")
+        if config.load_epoch == 0:
+            checkpoint_path = os.path.join(config.model_path, "model_best.pth")
+        checkpoint = torch.load(checkpoint_path)
+        state_dict = checkpoint.get("state_dict", checkpoint)
+        model.load_state_dict(state_dict)
+        print(f"Loaded checkpoint from {checkpoint_path}")
+
     return model, tokenizer
 
 
