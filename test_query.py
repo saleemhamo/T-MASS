@@ -1,21 +1,16 @@
 import os
-import gc
 import torch
-import random
-import numpy as np
-from tqdm import tqdm
 from transformers import CLIPTokenizer
-from config.all_config import AllConfig
+from model.model_factory import ModelFactory
 from datasets.msrvtt_dataset import MSRVTTDataset
 from torch.utils.data import DataLoader
+from config.all_config import AllConfig
 from datasets.model_transforms import init_transform_dict
-from model.model_factory import ModelFactory
-from modules.metrics import sim_matrix_inference_stochastic_light_allops, generate_embeds_per_video_id_stochastic, \
-    np_softmax
-from config.all_config import gen_log
+from stochastic_text_wrapper import StochasticTextWrapper  # Import the new wrapper module
 
 
 def load_model(config):
+    """Load the trained model and tokenizer."""
     model = ModelFactory.get_model(config)
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32", TOKENIZERS_PARALLELISM=False)
 
@@ -25,18 +20,23 @@ def load_model(config):
             checkpoint_path = os.path.join(config.model_path, "model_best.pth")
         checkpoint = torch.load(checkpoint_path)
         state_dict = checkpoint.get("state_dict", checkpoint)
-        model.load_state_dict(state_dict, strict=False)
+        model.load_state_dict(state_dict)
         print(f"Loaded checkpoint from {checkpoint_path}")
+
+    # Wrap the stochastic text module with the new wrapper
+    model.stochastic = StochasticTextWrapper(config)
 
     return model, tokenizer
 
 
 def process_query(query, tokenizer):
+    """Tokenize the text query."""
     inputs = tokenizer(query, return_tensors="pt")
     return inputs
 
 
 def load_data(config):
+    """Load and preprocess the video data from MSR-VTT dataset."""
     img_transforms = init_transform_dict(config.input_res)
     dataset = MSRVTTDataset(config, split_type='test', img_transforms=img_transforms['clip_test'])
     data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers)
@@ -44,105 +44,65 @@ def load_data(config):
 
 
 def find_top_k_matches(config, query, model, tokenizer, data_loader, k=5):
+    """Find the top-k matching videos for the given query."""
     text_inputs = process_query(query, tokenizer)
+    text_features = model.clip.get_text_features(
+        input_ids=text_inputs['input_ids'].cuda(),
+        attention_mask=text_inputs['attention_mask'].cuda()
+    )
+
+    top_k_scores = []
+    top_k_videos = []
 
     with torch.no_grad():
-        text_features = model.clip.get_text_features(
-            input_ids=text_inputs['input_ids'].cuda(),
-            attention_mask=text_inputs['attention_mask'].cuda()
-        )
-
-        all_text_embed_stochastic = []
-        for trial in range(config.stochasic_trials):
-            print(f"Text features shape before stochastic (trial {trial}): {text_features.shape}")
-            text_embed_stochastic, _, _ = model.stochastic(text_features, text_features)
-            print(f"Text embed stochastic shape (trial {trial}): {text_embed_stochastic.shape}")
-            all_text_embed_stochastic.append(text_embed_stochastic)
-        text_features = torch.stack(all_text_embed_stochastic, dim=0)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
-        vid_embeds_per_video_id = {}
         for batch in data_loader:
             video_ids = batch['video_id']
-            video_features_list = []
+            video_features = batch['video'].cuda()
 
-            for idx, video_id in enumerate(video_ids):
-                video_data = batch['video'][idx].unsqueeze(0).cuda()
-                _, num_frames, channels, height, width = video_data.shape
+            batch_size, num_frames, channels, height, width = video_features.shape
+            video_features = video_features.view(batch_size * num_frames, channels, height, width)
+            video_features = model.clip.get_image_features(video_features)
+            video_features = video_features.view(batch_size, num_frames, -1)
 
-                if channels != 3:
-                    raise ValueError(f"Expected 3 channels (RGB), but got {channels} channels.")
+            for trial in range(config.stochasic_trials):
+                text_embed_stochastic, _, _ = model.stochastic(text_features, video_features)
 
-                video_data = video_data.view(-1, channels, height, width)
-                video_features = model.clip.get_image_features(video_data)
+                similarities = torch.matmul(text_embed_stochastic, video_features.mean(dim=1).t())
+                top_scores, top_indices = similarities.topk(k, dim=1)
 
-                video_features_list.append(video_features)
+                top_k_scores.extend(top_scores.cpu().numpy().flatten())
+                top_k_videos.extend([video_ids[i] for i in top_indices.cpu().numpy().flatten()])
 
-            video_features_tensor = torch.stack(video_features_list).squeeze()
+    # Combine scores and video IDs, then sort by score
+    combined_results = list(zip(top_k_scores, top_k_videos))
+    combined_results.sort(key=lambda x: x[0], reverse=True)
 
-            if video_features_tensor.dim() == 3:
-                video_features_tensor = video_features_tensor.mean(dim=1)
-
-            for i, video_id in enumerate(video_ids):
-                vid_embeds_per_video_id[video_id] = video_features_tensor[i]
-
-        model.pool_frames.cpu()
-        vid_embeds_pooled = model.pool_frames(text_features[0], torch.stack(list(vid_embeds_per_video_id.values())))
-        model.pool_frames.cuda()
-
-        text_embeds_per_video_id, vid_embeds_pooled_per_video_id = generate_embeds_per_video_id_stochastic(
-            text_features,
-            vid_embeds_pooled,
-            list(vid_embeds_per_video_id.keys()),
-            config.pooling_type
-        )
-
-        sims = sim_matrix_inference_stochastic_light_allops(
-            text_embeds_per_video_id,
-            vid_embeds_pooled_per_video_id,
-            config.pooling_type,
-            config.batch_size_split,
-            config
-        )
-
-        if config.DSL:
-            sims = sims * np_softmax(sims * 100, axis=0)
-
-        sorted_indices = torch.argsort(sims[0], descending=True)
-        top_videos = [(list(vid_embeds_per_video_id.keys())[i], sims[0, i].item()) for i in sorted_indices[:k]]
-
-    return top_videos
+    # Return top-k results
+    return combined_results[:k]
 
 
 def main():
+    # Load configuration from AllConfig, which parses command-line arguments
     config = AllConfig()
-    os.environ['TOKENIZERS_PARALLELISM'] = "false"
-    writer = None
 
-    if config.gpu is not None and config.gpu != '99':
-        print('set GPU')
-        os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu
-        torch.backends.cudnn.enabled = True
-        torch.backends.cudnn.benchmark = True
-        if not torch.cuda.is_available():
-            raise Exception('NO GPU!')
+    # Set the model path based on the parsed arguments
+    config.model_path = os.path.join(config.output_dir, config.exp_name, config.datetime)
 
-    if config.seed >= 0:
-        torch.manual_seed(config.seed)
-        np.random.seed(config.seed)
-        torch.cuda.manual_seed_all(config.seed)
-        random.seed(config.seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+    # Set the device
+    os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Load model and tokenizer
     model, tokenizer = load_model(config)
-    model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    model.to(device)
 
+    # Load data
     data_loader = load_data(config)
 
+    # Find the top-k matching videos
     top_videos = find_top_k_matches(config, config.query, model, tokenizer, data_loader, k=5)
-    print(f"Top 5 matching videos for the query '{config.query}':")
-    for video_id, score in top_videos:
+    print(f"Top {len(top_videos)} matching videos for the query '{config.query}':")
+    for score, video_id in top_videos:
         print(f"Video ID: {video_id}, Score: {score}")
 
 
