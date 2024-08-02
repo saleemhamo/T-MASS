@@ -73,8 +73,7 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, cache, k=5)
         attention_mask=text_inputs['attention_mask'].cuda()
     )
 
-    top_k_scores = []
-    top_k_videos = []
+    video_scores = {}
 
     with torch.no_grad():
         for batch in data_loader:
@@ -116,15 +115,16 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, cache, k=5)
                 similarities = torch.matmul(text_embed_stochastic, video_features_tensor.t())
                 top_scores, top_indices = similarities.topk(k, dim=1)
 
-                top_k_scores.extend(top_scores.cpu().numpy().flatten())
-                top_k_videos.extend([video_ids[i] for i in top_indices.cpu().numpy().flatten()])
+                for score, idx in zip(top_scores.cpu().numpy().flatten(), top_indices.cpu().numpy().flatten()):
+                    video_id = video_ids[idx]
+                    if video_id in video_scores:
+                        video_scores[video_id] = max(video_scores[video_id], score)
+                    else:
+                        video_scores[video_id] = score
 
-    # Combine scores and video IDs, then sort by score
-    combined_results = list(zip(top_k_scores, top_k_videos))
-    combined_results.sort(key=lambda x: x[0], reverse=True)
-
-    # Return top-k results
-    return combined_results[:k]
+    # Sort video scores and get the top-k
+    sorted_videos = sorted(video_scores.items(), key=lambda item: item[1], reverse=True)
+    return sorted_videos[:k]
 
 
 def main():
@@ -154,7 +154,7 @@ def main():
     # Find the top-k matching videos
     top_videos = find_top_k_matches(config, config.query, model, tokenizer, data_loader, cache, k=5)
     print(f"Top {len(top_videos)} matching videos for the query '{config.query}':")
-    for score, video_id in top_videos:
+    for video_id, score in top_videos:
         print(f"Video ID: {video_id}, Score: {score}")
 
     # Save the updated cache
