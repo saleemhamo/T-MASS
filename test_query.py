@@ -1,22 +1,25 @@
 import os
+import gc
 import torch
-import pickle
 import random
 import numpy as np
+import pickle
+from tqdm import tqdm
 from transformers import CLIPTokenizer
-from model.model_factory import ModelFactory
+from config.all_config import AllConfig
 from datasets.msrvtt_dataset import MSRVTTDataset
 from torch.utils.data import DataLoader
-from config.all_config import AllConfig
 from datasets.model_transforms import init_transform_dict
+from model.model_factory import ModelFactory
 from trainer.trainer_stochastic import Trainer
-from modules.metrics import t2v_metrics
+from modules.metrics import sim_matrix_inference_stochastic_light_allops, generate_embeds_per_video_id_stochastic, \
+    np_softmax
+from config.all_config import gen_log
 
 CACHE_DIR = "./cache"
 
 
 def load_model(config):
-    """Load the trained model and tokenizer."""
     model = ModelFactory.get_model(config)
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32", TOKENIZERS_PARALLELISM=False)
 
@@ -33,13 +36,11 @@ def load_model(config):
 
 
 def process_query(query, tokenizer):
-    """Tokenize the text query."""
     inputs = tokenizer(query, return_tensors="pt")
     return inputs
 
 
 def load_data(config):
-    """Load and preprocess the video data from MSR-VTT dataset."""
     img_transforms = init_transform_dict(config.input_res)
     dataset = MSRVTTDataset(config, split_type='test', img_transforms=img_transforms['clip_test'])
     data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers)
@@ -47,7 +48,6 @@ def load_data(config):
 
 
 def load_cache(cache_file):
-    """Load the cache from a file if it exists."""
     if os.path.exists(cache_file):
         with open(cache_file, 'rb') as f:
             cache = pickle.load(f)
@@ -58,7 +58,6 @@ def load_cache(cache_file):
 
 
 def save_cache(cache, cache_file):
-    """Save the cache to a file."""
     os.makedirs(CACHE_DIR, exist_ok=True)
     with open(cache_file, 'wb') as f:
         pickle.dump(cache, f)
@@ -66,11 +65,7 @@ def save_cache(cache, cache_file):
 
 
 def find_top_k_matches(query, model, tokenizer, data_loader, cache, k=5):
-    """Find the top k matching videos for the given query."""
     text_inputs = process_query(query, tokenizer)
-
-    all_scores = []
-    all_video_ids = []
 
     with torch.no_grad():
         text_features = model.clip.get_text_features(
@@ -78,6 +73,14 @@ def find_top_k_matches(query, model, tokenizer, data_loader, cache, k=5):
             attention_mask=text_inputs['attention_mask'].cuda()
         )
 
+        all_text_embed_stochastic = []
+        for trial in range(config.stochasic_trials):
+            text_embed_stochastic, _, _ = model.stochastic(text_features, text_features)
+            all_text_embed_stochastic.append(text_embed_stochastic)
+        text_features = torch.stack(all_text_embed_stochastic, dim=0)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+        vid_embeds_per_video_id = {}
         for batch in data_loader:
             video_ids = batch['video_id']
             video_features_list = []
@@ -103,14 +106,33 @@ def find_top_k_matches(query, model, tokenizer, data_loader, cache, k=5):
             if video_features_tensor.dim() == 3:
                 video_features_tensor = video_features_tensor.mean(dim=1)
 
-            similarities = torch.matmul(text_features, video_features_tensor.t())
+            for i, video_id in enumerate(video_ids):
+                vid_embeds_per_video_id[video_id] = video_features_tensor[i]
 
-            video_scores = similarities.mean(dim=1).cpu().tolist()
-            all_scores.extend(video_scores)
-            all_video_ids.extend(video_ids)
+        model.pool_frames.cpu()
+        vid_embeds_pooled = model.pool_frames(text_features[0], torch.stack(list(vid_embeds_per_video_id.values())))
+        model.pool_frames.cuda()
 
-    top_scores_indices = sorted(range(len(all_scores)), key=lambda i: all_scores[i], reverse=True)[:k]
-    top_videos = [(all_video_ids[i], all_scores[i]) for i in top_scores_indices]
+        text_embeds_per_video_id, vid_embeds_pooled_per_video_id = generate_embeds_per_video_id_stochastic(
+            text_features,
+            vid_embeds_pooled,
+            list(vid_embeds_per_video_id.keys()),
+            config.pooling_type
+        )
+
+        sims = sim_matrix_inference_stochastic_light_allops(
+            text_embeds_per_video_id,
+            vid_embeds_pooled_per_video_id,
+            config.pooling_type,
+            config.batch_size_split,
+            config
+        )
+
+        if config.DSL:
+            sims = sims * np_softmax(sims * 100, axis=0)
+
+        sorted_indices = torch.argsort(sims[0], descending=True)
+        top_videos = [(list(vid_embeds_per_video_id.keys())[i], sims[0, i].item()) for i in sorted_indices[:k]]
 
     return top_videos
 
