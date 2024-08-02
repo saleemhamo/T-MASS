@@ -3,7 +3,6 @@ import gc
 import torch
 import random
 import numpy as np
-import pickle
 from tqdm import tqdm
 from transformers import CLIPTokenizer
 from config.all_config import AllConfig
@@ -11,12 +10,9 @@ from datasets.msrvtt_dataset import MSRVTTDataset
 from torch.utils.data import DataLoader
 from datasets.model_transforms import init_transform_dict
 from model.model_factory import ModelFactory
-from trainer.trainer_stochastic import Trainer
 from modules.metrics import sim_matrix_inference_stochastic_light_allops, generate_embeds_per_video_id_stochastic, \
     np_softmax
 from config.all_config import gen_log
-
-CACHE_DIR = "./cache"
 
 
 def load_model(config):
@@ -47,24 +43,7 @@ def load_data(config):
     return data_loader
 
 
-def load_cache(cache_file):
-    if os.path.exists(cache_file):
-        with open(cache_file, 'rb') as f:
-            cache = pickle.load(f)
-        print(f"Loaded cache from {cache_file}")
-    else:
-        cache = {}
-    return cache
-
-
-def save_cache(cache, cache_file):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    with open(cache_file, 'wb') as f:
-        pickle.dump(cache, f)
-    print(f"Saved cache to {cache_file}")
-
-
-def find_top_k_matches(query, model, tokenizer, data_loader, cache, k=5):
+def find_top_k_matches(query, model, tokenizer, data_loader, k=5):
     text_inputs = process_query(query, tokenizer)
 
     with torch.no_grad():
@@ -86,18 +65,14 @@ def find_top_k_matches(query, model, tokenizer, data_loader, cache, k=5):
             video_features_list = []
 
             for idx, video_id in enumerate(video_ids):
-                if video_id in cache:
-                    video_features = cache[video_id].cuda()
-                else:
-                    video_data = batch['video'][idx].unsqueeze(0).cuda()
-                    _, num_frames, channels, height, width = video_data.shape
+                video_data = batch['video'][idx].unsqueeze(0).cuda()
+                _, num_frames, channels, height, width = video_data.shape
 
-                    if channels != 3:
-                        raise ValueError(f"Expected 3 channels (RGB), but got {channels} channels.")
+                if channels != 3:
+                    raise ValueError(f"Expected 3 channels (RGB), but got {channels} channels.")
 
-                    video_data = video_data.view(-1, channels, height, width)
-                    video_features = model.clip.get_image_features(video_data)
-                    cache[video_id] = video_features.cpu()
+                video_data = video_data.view(-1, channels, height, width)
+                video_features = model.clip.get_image_features(video_data)
 
                 video_features_list.append(video_features)
 
@@ -162,15 +137,11 @@ def main():
     model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     data_loader = load_data(config)
-    cache_file = os.path.join(CACHE_DIR, f"{config.dataset_name}_video_features.pkl")
-    cache = load_cache(cache_file)
 
-    top_videos = find_top_k_matches(config.query, model, tokenizer, data_loader, cache, k=5)
+    top_videos = find_top_k_matches(config.query, model, tokenizer, data_loader, k=5)
     print(f"Top 5 matching videos for the query '{config.query}':")
     for video_id, score in top_videos:
         print(f"Video ID: {video_id}, Score: {score}")
-
-    save_cache(cache, cache_file)
 
 
 if __name__ == '__main__':
