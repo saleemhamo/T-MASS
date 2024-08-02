@@ -60,6 +60,8 @@ class Config(ABC):
         self.stochastic_prior = args.stochastic_prior
         self.stochastic_prior_std = args.stochastic_prior_std
         self.query = args.query
+        self.num_layers = 2  # Number of transformer layers
+        self.num_mha_heads = 8  # Number of attention heads
 
     @abstractmethod
     def parse_args(self):
