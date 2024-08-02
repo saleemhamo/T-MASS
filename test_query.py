@@ -7,9 +7,6 @@ from datasets.msrvtt_dataset import MSRVTTDataset
 from torch.utils.data import DataLoader
 from config.all_config import AllConfig
 from datasets.model_transforms import init_transform_dict
-from stochastic_text_wrapper import StochasticTextWrapper  # Import the new wrapper module
-
-CACHE_DIR = "./cache"
 
 
 def load_model(config):
@@ -44,25 +41,6 @@ def load_data(config):
     dataset = MSRVTTDataset(config, split_type='test', img_transforms=img_transforms['clip_test'])
     data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers)
     return data_loader
-
-
-def load_cache(cache_file):
-    """Load the cache from a file if it exists."""
-    if os.path.exists(cache_file):
-        with open(cache_file, 'rb') as f:
-            cache = pickle.load(f)
-        print(f"Loaded cache from {cache_file}")
-    else:
-        cache = {}
-    return cache
-
-
-def save_cache(cache, cache_file):
-    """Save the cache to a file."""
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    with open(cache_file, 'wb') as f:
-        pickle.dump(cache, f)
-    print(f"Saved cache to {cache_file}")
 
 
 def find_top_k_matches(config, query, model, tokenizer, data_loader, k=5):
@@ -121,20 +99,11 @@ def main():
     # Load data
     data_loader = load_data(config)
 
-    # Define cache file path
-    cache_file = os.path.join(CACHE_DIR, f"{config.dataset_name}_video_features.pkl")
-
-    # Load existing cache or initialize new one
-    cache = load_cache(cache_file)
-
     # Find the top-k matching videos
     top_videos = find_top_k_matches(config, config.query, model, tokenizer, data_loader, k=5)
     print(f"Top {len(top_videos)} matching videos for the query '{config.query}':")
-    for video_id, score in top_videos:
+    for score, video_id in top_videos:
         print(f"Video ID: {video_id}, Score: {score}")
-
-    # Save the updated cache
-    save_cache(cache, cache_file)
 
 
 if __name__ == '__main__':

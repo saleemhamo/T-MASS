@@ -2,6 +2,7 @@ import torch.nn as nn
 from modules.stochastic_module import StochasticText
 from transformer_alignment import TransformerAlignment
 
+
 class StochasticTextWrapper(nn.Module):
     def __init__(self, config):
         super(StochasticTextWrapper, self).__init__()
