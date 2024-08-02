@@ -1,17 +1,24 @@
-import torch
-from torch import nn
-from config.base_config import Config
+import torch.nn as nn
 from modules.stochastic_module import StochasticText
 
 
 class StochasticTextWrapper(nn.Module):
-    def __init__(self, config: Config):
+    def __init__(self, config):
         super(StochasticTextWrapper, self).__init__()
-        self.stochastic_text = StochasticText(config)
+        self.config = config
+        self.stochastic = StochasticText(config)
+        self.transformer_alignment = TransformerAlignment(
+            embed_dim=config.embed_dim,
+            num_heads=config.num_mha_heads,
+            num_layers=config.num_layers,
+            dropout=config.transformer_dropout
+        )
 
     def forward(self, text_features, video_features):
-        # Check if video_features has 3 dimensions, if not adjust it
-        if video_features.dim() == 2:
-            video_features = video_features.unsqueeze(1).repeat(1, self.stochastic_text.config.num_frames, 1)
+        # Perform stochastic text embedding
+        text_embed_stochastic, text_mean, log_var = self.stochastic(text_features, video_features)
 
-        return self.stochastic_text(text_features, video_features)
+        # Align embeddings using transformer layers
+        aligned_text_features = self.transformer_alignment(text_embed_stochastic, video_features)
+
+        return aligned_text_features, text_mean, log_var
