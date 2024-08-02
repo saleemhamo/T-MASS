@@ -128,7 +128,7 @@ def main():
     cache = load_cache(cache_file)
 
     # Find the top-k matching videos
-    top_videos = find_top_k_matches(config, config.query, model, tokenizer, data_loader, cache, k=5)
+    top_videos = find_top_k_matches(config, config.query, model, tokenizer, data_loader, k=5)
     print(f"Top {len(top_videos)} matching videos for the query '{config.query}':")
     for video_id, score in top_videos:
         print(f"Video ID: {video_id}, Score: {score}")
