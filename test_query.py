@@ -1,6 +1,7 @@
 import os
 import torch
 import pickle
+import random
 import numpy as np
 from transformers import CLIPTokenizer
 from model.model_factory import ModelFactory
