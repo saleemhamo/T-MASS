@@ -1,15 +1,12 @@
 import os
 import torch
 import pickle
-import numpy as np
 from transformers import CLIPTokenizer
 from model.model_factory import ModelFactory
 from datasets.msrvtt_dataset import MSRVTTDataset
 from torch.utils.data import DataLoader
 from config.all_config import AllConfig
 from datasets.model_transforms import init_transform_dict
-from trainer.trainer_stochastic import Trainer
-from modules.metrics import t2v_metrics
 
 CACHE_DIR = "./cache"
 
@@ -64,14 +61,15 @@ def save_cache(cache, cache_file):
     print(f"Saved cache to {cache_file}")
 
 
-def find_top_k_matches(query, model, tokenizer, data_loader, cache, k=5):
-    """Find the top k matching videos for the given query."""
+def find_best_match(query, model, tokenizer, data_loader, cache):
+    """Find the top 5 matching videos for the given query."""
     text_inputs = process_query(query, tokenizer)
 
     all_scores = []
     all_video_ids = []
 
     with torch.no_grad():
+        # Encode the query to text features
         text_features = model.clip.get_text_features(
             input_ids=text_inputs['input_ids'].cuda(),
             attention_mask=text_inputs['attention_mask'].cuda()
@@ -83,70 +81,80 @@ def find_top_k_matches(query, model, tokenizer, data_loader, cache, k=5):
 
             for idx, video_id in enumerate(video_ids):
                 if video_id in cache:
+                    # Use cached features
                     video_features = cache[video_id].cuda()
                 else:
+                    # Calculate and cache features
                     video_data = batch['video'][idx].unsqueeze(0).cuda()
                     _, num_frames, channels, height, width = video_data.shape
 
                     if channels != 3:
                         raise ValueError(f"Expected 3 channels (RGB), but got {channels} channels.")
 
+                    # Reshape to [batch_size * num_frames, channels, height, width]
                     video_data = video_data.view(-1, channels, height, width)
                     video_features = model.clip.get_image_features(video_data)
+
+                    # Cache the features
                     cache[video_id] = video_features.cpu()
 
                 video_features_list.append(video_features)
 
+            # Stack video features and calculate similarities
             video_features_tensor = torch.stack(video_features_list).squeeze()
 
+            # If video_features_tensor is 3D, aggregate across the third dimension (frames)
             if video_features_tensor.dim() == 3:
                 video_features_tensor = video_features_tensor.mean(dim=1)
 
+            # Calculate similarities and aggregate into a single score per video
             similarities = torch.matmul(text_features, video_features_tensor.t())
 
+            # Get the mean score for each video
             video_scores = similarities.mean(dim=1).cpu().tolist()
             all_scores.extend(video_scores)
             all_video_ids.extend(video_ids)
 
-    top_scores_indices = sorted(range(len(all_scores)), key=lambda i: all_scores[i], reverse=True)[:k]
+    # Get the top 5 scores and their corresponding video IDs
+    top_scores_indices = sorted(range(len(all_scores)), key=lambda i: all_scores[i], reverse=True)[:5]
     top_videos = [(all_video_ids[i], all_scores[i]) for i in top_scores_indices]
 
     return top_videos
 
 
 def main():
+    # Load configuration from AllConfig, which parses command-line arguments
     config = AllConfig()
-    os.environ['TOKENIZERS_PARALLELISM'] = "false"
-    writer = None
 
-    if config.gpu is not None and config.gpu != '99':
-        print('set GPU')
-        os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu
-        torch.backends.cudnn.enabled = True
-        torch.backends.cudnn.benchmark = True
-        if not torch.cuda.is_available():
-            raise Exception('NO GPU!')
+    # Set the model path based on the parsed arguments
+    config.model_path = os.path.join(config.output_dir, config.exp_name, config.datetime)
 
-    if config.seed >= 0:
-        torch.manual_seed(config.seed)
-        np.random.seed(config.seed)
-        torch.cuda.manual_seed_all(config.seed)
-        random.seed(config.seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+    # Set the device
+    os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Load model and tokenizer
     model, tokenizer = load_model(config)
-    model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    model.to(device)
 
+    # Load data
     data_loader = load_data(config)
+
+    # Define cache file path
     cache_file = os.path.join(CACHE_DIR, f"{config.dataset_name}_video_features.pkl")
+
+    # Load existing cache or initialize new one
     cache = load_cache(cache_file)
 
-    top_videos = find_top_k_matches(config.query, model, tokenizer, data_loader, cache, k=5)
+    # Find the top 5 matching videos
+    top_videos = find_best_match(config.query, model, tokenizer, data_loader, cache)
+
+    # Display the top 5 matching videos
     print(f"Top 5 matching videos for the query '{config.query}':")
     for video_id, score in top_videos:
         print(f"Video ID: {video_id}, Score: {score}")
 
+    # Save the updated cache
     save_cache(cache, cache_file)
 
 
