@@ -20,7 +20,7 @@ def load_model(config):
             checkpoint_path = os.path.join(config.model_path, "model_best.pth")
         checkpoint = torch.load(checkpoint_path)
         state_dict = checkpoint.get("state_dict", checkpoint)
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=False)  # Use strict=False to ignore missing keys
         print(f"Loaded checkpoint from {checkpoint_path}")
 
     # Wrap the stochastic text module with the new wrapper
