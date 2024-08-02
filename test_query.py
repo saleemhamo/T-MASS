@@ -43,7 +43,7 @@ def load_data(config):
     return data_loader
 
 
-def find_top_k_matches(query, model, tokenizer, data_loader, k=5):
+def find_top_k_matches(config, query, model, tokenizer, data_loader, k=5):
     text_inputs = process_query(query, tokenizer)
 
     with torch.no_grad():
@@ -138,7 +138,7 @@ def main():
 
     data_loader = load_data(config)
 
-    top_videos = find_top_k_matches(config.query, model, tokenizer, data_loader, k=5)
+    top_videos = find_top_k_matches(config, config.query, model, tokenizer, data_loader, k=5)
     print(f"Top 5 matching videos for the query '{config.query}':")
     for video_id, score in top_videos:
         print(f"Video ID: {video_id}, Score: {score}")
