@@ -7,7 +7,7 @@ from datasets.msrvtt_dataset import MSRVTTDataset
 from torch.utils.data import DataLoader
 from config.all_config import AllConfig
 from datasets.model_transforms import init_transform_dict
-
+from stochastic_text_wrapper import StochasticTextWrapper
 
 def load_model(config):
     """Load the trained model and tokenizer."""
