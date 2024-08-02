@@ -54,7 +54,9 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, k=5):
 
         all_text_embed_stochastic = []
         for trial in range(config.stochasic_trials):
+            print(f"Text features shape before stochastic (trial {trial}): {text_features.shape}")
             text_embed_stochastic, _, _ = model.stochastic(text_features, text_features)
+            print(f"Text embed stochastic shape (trial {trial}): {text_embed_stochastic.shape}")
             all_text_embed_stochastic.append(text_embed_stochastic)
         text_features = torch.stack(all_text_embed_stochastic, dim=0)
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
