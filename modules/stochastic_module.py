@@ -7,6 +7,7 @@ class LinearCosRadius(nn.Module):
     '''
     Define the radius (R) as the linear function of the cos-similarity (t, v)
     '''
+
     def __init__(self, config: Config):
         super(LinearCosRadius, self).__init__()
         self.num_frames = config.num_frames
@@ -38,10 +39,25 @@ class LinearCosRadius(nn.Module):
         text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
         video_embeds = video_embeds / video_embeds.norm(dim=-1, keepdim=True)
 
+        # Check shapes before computation
+        print(f"text_embeds shape before unsqueeze and repeat: {text_embeds.shape}")
+        print(f"video_embeds shape: {video_embeds.shape}")
+
         # sim computation
         text_embeds = text_embeds.unsqueeze(1).repeat(1, self.config.num_frames, 1)
-        sims = torch.matmul(text_embeds, video_embeds.permute(0,2,1))
+
+        # Check shapes after unsqueeze and repeat
+        print(f"text_embeds shape after unsqueeze and repeat: {text_embeds.shape}")
+
+        sims = torch.matmul(text_embeds, video_embeds.permute(0, 2, 1))
+
+        # Check shapes after matmul
+        print(f"sims shape after matmul: {sims.shape}")
+
         sims = torch.mean(sims, dim=1)
+
+        # Check shapes after mean
+        print(f"sims shape after mean: {sims.shape}")
 
         # linear proj
         sims_out = self.linear_proj(sims)
@@ -70,13 +86,14 @@ class StochasticText(nn.Module):
 
         # radius
         log_var = self.std_branch(text_features, video_features)
-        text_std = torch.exp(log_var) # log var -> var
+        text_std = torch.exp(log_var)  # log var -> var
 
         # randomness
         if self.config.stochastic_prior == 'uniform01':
             sigma = torch.rand_like(text_features)
         elif self.config.stochastic_prior == 'normal':
-            sigma = torch.normal(mean=0., std=self.config.stochastic_prior_std, size=text_features.shape).to(text_std.device)
+            sigma = torch.normal(mean=0., std=self.config.stochastic_prior_std, size=text_features.shape).to(
+                text_std.device)
         else:
             raise NotImplementedError
 
@@ -84,5 +101,3 @@ class StochasticText(nn.Module):
         text_features = text_mean + sigma * text_std
 
         return text_features, text_mean, log_var
-
-
