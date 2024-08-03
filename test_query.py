@@ -106,7 +106,8 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
                     aligned_text_features, _, _ = model.stochastic(text_features, video_data)
 
                     similarities = torch.matmul(aligned_text_features, video_data.mean(dim=1).t())
-                    top_scores, top_indices = similarities.topk(k, dim=1)
+                    available_k = min(k, similarities.shape[1])
+                    top_scores, top_indices = similarities.topk(available_k, dim=1)
 
                     for score, idx in zip(top_scores.cpu().numpy().flatten(), top_indices.cpu().numpy().flatten()):
                         video_id = video_ids[idx]
