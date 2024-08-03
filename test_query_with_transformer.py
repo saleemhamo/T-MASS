@@ -1,6 +1,6 @@
 import os
 import torch
-import pandas as pd
+import pickle
 from transformers import CLIPTokenizer
 from model.model_factory import ModelFactory
 from datasets.msrvtt_dataset import MSRVTTDataset
@@ -8,7 +8,6 @@ from torch.utils.data import DataLoader
 from config.all_config import AllConfig
 from datasets.model_transforms import init_transform_dict
 from stochastic_text_wrapper import StochasticTextWrapper
-
 
 def load_model(config):
     """Load the trained model and tokenizer."""
@@ -44,7 +43,7 @@ def load_data(config):
     return data_loader
 
 
-def find_top_k_matches(config, query, model, tokenizer, data_loader, k=10):
+def find_top_k_matches(config, query, model, tokenizer, data_loader, k=5):
     """Find the top-k matching videos for the given query."""
     text_inputs = process_query(query, tokenizer)
     text_features = model.clip.get_text_features(
@@ -82,45 +81,6 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, k=10):
     return sorted_videos[:k]
 
 
-def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10):
-    """Evaluate the model on test data."""
-    correct_at_k = [0] * k
-    ranks = []
-    total_queries = len(test_data)
-
-    for _, row in test_data.iterrows():
-        query = row['sentence']
-        correct_video_id = row['video_id']
-        top_videos = find_top_k_matches(config, query, model, tokenizer, data_loader, k)
-        top_video_ids = [video_id for video_id, _ in top_videos]
-
-        for rank, video_id in enumerate(top_video_ids):
-            if video_id == correct_video_id:
-                ranks.append(rank + 1)
-                for i in range(rank, k):
-                    correct_at_k[i] += 1
-                break
-        else:
-            ranks.append(k + 1)
-
-    recall_at_k = [correct / total_queries for correct in correct_at_k]
-    median_rank = torch.median(torch.tensor(ranks)).item()
-    mean_rank = torch.mean(torch.tensor(ranks)).item()
-
-    results = {
-        "R@1": recall_at_k[0],
-        "R@5": recall_at_k[4],
-        "R@10": recall_at_k[9],
-        "MdR": median_rank,
-        "MnR": mean_rank
-    }
-
-    for metric, value in results.items():
-        print(f"{metric}: {value}")
-
-    return results
-
-
 def main():
     # Load configuration from AllConfig, which parses command-line arguments
     config = AllConfig()
@@ -139,11 +99,11 @@ def main():
     # Load data
     data_loader = load_data(config)
 
-    # Load test data
-    test_data = pd.read_csv('data/MSRVTT/MSRVTT_JSFUSION_test.csv', names=['key', 'vid_key', 'video_id', 'sentence'])
-
-    # Evaluate model on test data
-    evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10)
+    # Find the top-k matching videos
+    top_videos = find_top_k_matches(config, config.query, model, tokenizer, data_loader, k=5)
+    print(f"Top {len(top_videos)} matching videos for the query '{config.query}':")
+    for video_id, score in top_videos:
+        print(f"Video ID: {video_id}, Score: {score}")
 
 
 if __name__ == '__main__':
