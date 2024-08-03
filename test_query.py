@@ -1,7 +1,6 @@
 import os
 import torch
 import pandas as pd
-import pickle
 from transformers import CLIPTokenizer
 from model.model_factory import ModelFactory
 from datasets.msrvtt_dataset import MSRVTTDataset
@@ -82,6 +81,11 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
             video_ids = batch['video_id']
             video_features = batch['video'].cuda()
 
+            batch_size, num_frames, channels, height, width = video_features.shape
+            video_features = video_features.view(batch_size * num_frames, channels, height, width)
+            video_features = model.clip.get_image_features(video_features)
+            video_features = video_features.view(batch_size, num_frames, -1)
+
             for idx, video_id in enumerate(video_ids):
                 if video_id not in video_features_cache:
                     video_data = video_features[idx].unsqueeze(0)
@@ -110,15 +114,17 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
     return sorted_videos[:k]
 
 
-def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10):
+def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10, limit=None):
     """Evaluate the model on test data."""
     video_features_cache = load_cache(CACHE_FILE)
 
     correct_at_k = [0] * k
     ranks = []
-    total_queries = len(test_data)
+    total_queries = len(test_data) if limit is None else limit
 
-    for _, row in test_data.iterrows():
+    for i, (_, row) in enumerate(test_data.iterrows()):
+        if limit is not None and i >= limit:
+            break
         query = row['sentence']
         correct_video_id = row['video_id']
         top_videos = find_top_k_matches(config, query, model, tokenizer, data_loader, video_features_cache, k)
@@ -173,8 +179,8 @@ def main():
     # Load test data
     test_data = pd.read_csv('data/MSRVTT/MSRVTT_JSFUSION_test.csv', names=['key', 'vid_key', 'video_id', 'sentence'])
 
-    # Evaluate model on test data
-    evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10)
+    # Evaluate model on test data with a limit of 2 records
+    evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10, limit=2)
 
 
 if __name__ == '__main__':
