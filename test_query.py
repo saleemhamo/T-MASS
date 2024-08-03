@@ -1,6 +1,7 @@
 import os
 import torch
 import pandas as pd
+import pickle
 from transformers import CLIPTokenizer
 from model.model_factory import ModelFactory
 from datasets.msrvtt_dataset import MSRVTTDataset
@@ -140,15 +141,15 @@ def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data
         for rank, video_id in enumerate(top_video_ids):
             if video_id == correct_video_id:
                 ranks.append(rank + 1)
-                for i in range(rank, k):
-                    correct_at_k[i] += 1
+                for j in range(rank, k):
+                    correct_at_k[j] += 1
                 break
         else:
             ranks.append(k + 1)
 
     recall_at_k = [correct / total_queries for correct in correct_at_k]
-    median_rank = torch.median(torch.tensor(ranks)).item()
-    mean_rank = torch.mean(torch.tensor(ranks)).item()
+    median_rank = torch.median(torch.tensor(ranks, dtype=torch.float)).item()
+    mean_rank = torch.mean(torch.tensor(ranks, dtype=torch.float)).item()
 
     results = {
         "R@1": recall_at_k[0],
