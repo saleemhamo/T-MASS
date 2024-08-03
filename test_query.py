@@ -1,6 +1,7 @@
 import os
 import torch
 import pandas as pd
+import pickle
 from transformers import CLIPTokenizer
 from model.model_factory import ModelFactory
 from datasets.msrvtt_dataset import MSRVTTDataset
@@ -8,6 +9,14 @@ from torch.utils.data import DataLoader
 from config.all_config import AllConfig
 from datasets.model_transforms import init_transform_dict
 from stochastic_text_wrapper import StochasticTextWrapper
+
+# Setup logging
+import logging
+
+logging.basicConfig(filename='evaluation.log', level=logging.INFO, format='%(asctime)s %(message)s')
+logger = logging.getLogger()
+
+CACHE_FILE = 'video_features_cache.pkl'
 
 
 def load_model(config):
@@ -22,7 +31,7 @@ def load_model(config):
         checkpoint = torch.load(checkpoint_path)
         state_dict = checkpoint.get("state_dict", checkpoint)
         model.load_state_dict(state_dict, strict=False)  # Use strict=False to ignore missing keys
-        print(f"Loaded checkpoint from {checkpoint_path}")
+        logger.info(f"Loaded checkpoint from {checkpoint_path}")
 
     # Wrap the stochastic text module with the new wrapper
     model.stochastic = StochasticTextWrapper(config)
@@ -44,7 +53,21 @@ def load_data(config):
     return data_loader
 
 
-def find_top_k_matches(config, query, model, tokenizer, data_loader, k=10):
+def save_cache(cache, file_path):
+    """Save the cache to a file."""
+    with open(file_path, 'wb') as f:
+        pickle.dump(cache, f)
+
+
+def load_cache(file_path):
+    """Load the cache from a file if it exists."""
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as f:
+            return pickle.load(f)
+    return {}
+
+
+def find_top_k_matches(config, query, model, tokenizer, data_loader, video_features_cache, k=10):
     """Find the top-k matching videos for the given query."""
     text_inputs = process_query(query, tokenizer)
     text_features = model.clip.get_text_features(
@@ -59,26 +82,28 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, k=10):
             video_ids = batch['video_id']
             video_features = batch['video'].cuda()
 
-            batch_size, num_frames, channels, height, width = video_features.shape
-            video_features = video_features.view(batch_size * num_frames, channels, height, width)
-            video_features = model.clip.get_image_features(video_features)
-            video_features = video_features.view(batch_size, num_frames, -1)
+            for idx, video_id in enumerate(video_ids):
+                if video_id not in video_features_cache:
+                    video_data = video_features[idx].unsqueeze(0)
+                    batch_size, num_frames, channels, height, width = video_data.shape
+                    video_data = video_data.view(batch_size * num_frames, channels, height, width)
+                    video_features_tensor = model.clip.get_image_features(video_data)
+                    video_features_tensor = video_features_tensor.view(batch_size, num_frames, -1)
+                    video_features_cache[video_id] = video_features_tensor.cpu()
+                else:
+                    video_features_tensor = video_features_cache[video_id].cuda()
 
-            for trial in range(config.stochasic_trials):
-                aligned_text_features, _, _ = model.stochastic(text_features, video_features)
+                for trial in range(config.stochasic_trials):
+                    aligned_text_features, _, _ = model.stochastic(text_features, video_features_tensor)
+                    similarities = torch.matmul(aligned_text_features, video_features_tensor.mean(dim=1).t())
+                    top_scores, top_indices = similarities.topk(k, dim=1)
 
-                similarities = torch.matmul(aligned_text_features, video_features.mean(dim=1).t())
-
-                # Adjust k to be the minimum of k and the number of available videos
-                current_k = min(k, similarities.size(1))
-                top_scores, top_indices = similarities.topk(current_k, dim=1)
-
-                for score, idx in zip(top_scores.cpu().numpy().flatten(), top_indices.cpu().numpy().flatten()):
-                    video_id = video_ids[idx]
-                    if video_id in video_scores:
-                        video_scores[video_id] = max(video_scores[video_id], score)
-                    else:
-                        video_scores[video_id] = score
+                    for score, idx in zip(top_scores.cpu().numpy().flatten(), top_indices.cpu().numpy().flatten()):
+                        video_id = video_ids[idx]
+                        if video_id in video_scores:
+                            video_scores[video_id] = max(video_scores[video_id], score)
+                        else:
+                            video_scores[video_id] = score
 
     # Sort video scores and get the top-k
     sorted_videos = sorted(video_scores.items(), key=lambda item: item[1], reverse=True)
@@ -87,6 +112,8 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, k=10):
 
 def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10):
     """Evaluate the model on test data."""
+    video_features_cache = load_cache(CACHE_FILE)
+
     correct_at_k = [0] * k
     ranks = []
     total_queries = len(test_data)
@@ -94,7 +121,7 @@ def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data
     for _, row in test_data.iterrows():
         query = row['sentence']
         correct_video_id = row['video_id']
-        top_videos = find_top_k_matches(config, query, model, tokenizer, data_loader, k)
+        top_videos = find_top_k_matches(config, query, model, tokenizer, data_loader, video_features_cache, k)
         top_video_ids = [video_id for video_id, _ in top_videos]
 
         for rank, video_id in enumerate(top_video_ids):
@@ -119,8 +146,9 @@ def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data
     }
 
     for metric, value in results.items():
-        print(f"{metric}: {value}")
+        logger.info(f"{metric}: {value}")
 
+    save_cache(video_features_cache, CACHE_FILE)
     return results
 
 
