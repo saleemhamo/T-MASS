@@ -81,25 +81,31 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
             video_ids = batch['video_id']
             video_features = batch['video'].cuda()
 
-            batch_size, num_frames, channels, height, width = video_features.shape
-            video_features = video_features.view(batch_size * num_frames, channels, height, width)
+            if video_features.dim() == 5:
+                batch_size, num_frames, channels, height, width = video_features.shape
+                video_features = video_features.view(batch_size * num_frames, channels, height, width)
+            elif video_features.dim() == 4:
+                batch_size, channels, height, width = video_features.shape
+                num_frames = 1
+            else:
+                raise ValueError(f"Unexpected video features shape: {video_features.shape}")
+
             video_features = model.clip.get_image_features(video_features)
-            video_features = video_features.view(batch_size, num_frames, -1)
+
+            if num_frames > 1:
+                video_features = video_features.view(batch_size, num_frames, -1)
 
             for idx, video_id in enumerate(video_ids):
                 if video_id not in video_features_cache:
                     video_data = video_features[idx].unsqueeze(0)
-                    batch_size, num_frames, channels, height, width = video_data.shape
-                    video_data = video_data.view(batch_size * num_frames, channels, height, width)
-                    video_features_tensor = model.clip.get_image_features(video_data)
-                    video_features_tensor = video_features_tensor.view(batch_size, num_frames, -1)
-                    video_features_cache[video_id] = video_features_tensor.cpu()
+                    video_features_cache[video_id] = video_data.cpu()
                 else:
-                    video_features_tensor = video_features_cache[video_id].cuda()
+                    video_data = video_features_cache[video_id].cuda()
 
                 for trial in range(config.stochasic_trials):
-                    aligned_text_features, _, _ = model.stochastic(text_features, video_features_tensor)
-                    similarities = torch.matmul(aligned_text_features, video_features_tensor.mean(dim=1).t())
+                    aligned_text_features, _, _ = model.stochastic(text_features, video_data)
+
+                    similarities = torch.matmul(aligned_text_features, video_data.mean(dim=1).t())
                     top_scores, top_indices = similarities.topk(k, dim=1)
 
                     for score, idx in zip(top_scores.cpu().numpy().flatten(), top_indices.cpu().numpy().flatten()):
