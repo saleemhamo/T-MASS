@@ -190,7 +190,8 @@ def main():
     data_loader = load_data(config)
 
     # Load test data
-    test_data = pd.read_csv('data/MSRVTT/MSRVTT_JSFUSION_test.csv', names=['key', 'vid_key', 'video_id', 'sentence'])
+    test_data = pd.read_csv('data/MSRVTT/MSRVTT_JSFUSION_test.csv', header=None,
+                            names=['key', 'vid_key', 'video_id', 'sentence'], skiprows=1)
 
     # Evaluate model on test data with a limit of 2 records for testing
     evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10)
