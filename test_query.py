@@ -10,9 +10,10 @@ from config.all_config import AllConfig
 from datasets.model_transforms import init_transform_dict
 from stochastic_text_wrapper import StochasticTextWrapper
 from tqdm import tqdm  # For progress tracking
-import logging
 
 # Setup logging
+import logging
+
 logging.basicConfig(filename='evaluation.log', level=logging.INFO, format='%(asctime)s %(message)s')
 logger = logging.getLogger()
 
@@ -114,6 +115,11 @@ def find_top_k_matches(config, query, model, tokenizer, video_features_cache, k=
             for trial in range(config.stochasic_trials):
                 aligned_text_features, _, _ = model.stochastic(text_features, video_data)
 
+                # Debug: print shapes before matrix multiplication
+                print(f"text_features shape: {text_features.shape}")
+                print(f"video_data shape: {video_data.shape}")
+                print(f"aligned_text_features shape: {aligned_text_features.shape}")
+
                 # Ensure the dimensions are correct for matrix multiplication
                 video_data_mean = video_data.mean(dim=0)  # shape: [num_frames, embed_dim]
                 if video_data_mean.dim() == 2:
@@ -121,6 +127,10 @@ def find_top_k_matches(config, query, model, tokenizer, video_features_cache, k=
                 else:
                     video_data_mean_2d = video_data_mean.unsqueeze(0)  # shape: [1, embed_dim]
                 aligned_text_features_2d = aligned_text_features.squeeze(0)  # Ensure aligned_text_features is 2D
+
+                # Debug: print shapes before matrix multiplication
+                print(f"aligned_text_features_2d shape: {aligned_text_features_2d.shape}")
+                print(f"video_data_mean_2d shape: {video_data_mean_2d.shape}")
 
                 similarities = torch.matmul(aligned_text_features_2d, video_data_mean_2d.t())
 
