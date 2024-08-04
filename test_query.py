@@ -41,7 +41,7 @@ def load_model(config):
 
 def process_query(query, tokenizer):
     """Tokenize the text query."""
-    inputs = tokenizer(query, return_tensors="pt")
+    inputs = tokenizer(query, return_tensors="pt").to('cuda')
     return inputs
 
 
@@ -71,8 +71,8 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
     """Find the top-k matching videos for the given query."""
     text_inputs = process_query(query, tokenizer)
     text_features = model.clip.get_text_features(
-        input_ids=text_inputs['input_ids'].cuda(),
-        attention_mask=text_inputs['attention_mask'].cuda()
+        input_ids=text_inputs['input_ids'],
+        attention_mask=text_inputs['attention_mask']
     )
 
     video_scores = {}
@@ -80,7 +80,7 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
     with torch.no_grad():
         for batch in data_loader:
             video_ids = batch['video_id']
-            video_features = batch['video'].cuda()
+            video_features = batch['video'].to('cuda')
 
             if video_features.dim() == 5:
                 batch_size, num_frames, channels, height, width = video_features.shape
@@ -101,7 +101,7 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
                     video_data = video_features[idx].unsqueeze(0)
                     video_features_cache[video_id] = video_data.cpu()
                 else:
-                    video_data = video_features_cache[video_id].cuda()
+                    video_data = video_features_cache[video_id].to('cuda')
 
                 for trial in range(config.stochasic_trials):
                     aligned_text_features, _, _ = model.stochastic(text_features, video_data)
@@ -147,6 +147,10 @@ def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data
         else:
             ranks.append(k + 1)
 
+        # Log progress
+        logger.info(f"Processed query {i + 1}/{total_queries}: {query}")
+        print(f"Processed query {i + 1}/{total_queries}: {query}")
+
     recall_at_k = [correct / total_queries for correct in correct_at_k]
     median_rank = torch.median(torch.tensor(ranks, dtype=torch.float)).item()
     mean_rank = torch.mean(torch.tensor(ranks, dtype=torch.float)).item()
@@ -161,6 +165,7 @@ def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data
 
     for metric, value in results.items():
         logger.info(f"{metric}: {value}")
+        print(f"{metric}: {value}")
 
     save_cache(video_features_cache, CACHE_FILE)
     return results
@@ -187,8 +192,8 @@ def main():
     # Load test data
     test_data = pd.read_csv('data/MSRVTT/MSRVTT_JSFUSION_test.csv', names=['key', 'vid_key', 'video_id', 'sentence'])
 
-    # Evaluate model on test data with a limit of 2 records
-    evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10)
+    # Evaluate model on test data with a limit of 2 records for testing
+    evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10, limit=2)
 
 
 if __name__ == '__main__':
