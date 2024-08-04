@@ -40,8 +40,8 @@ class LinearCosRadius(nn.Module):
         video_embeds = video_embeds / video_embeds.norm(dim=-1, keepdim=True)
 
         # Debug: print shapes
-        print(f"Before sim computation - text_embeds shape: {text_embeds.shape}")
-        print(f"Before sim computation - video_embeds shape: {video_embeds.shape}")
+        # print(f"Before sim computation - text_embeds shape: {text_embeds.shape}")
+        # print(f"Before sim computation - video_embeds shape: {video_embeds.shape}")
 
         # sim computation
         if text_embeds.dim() == 2:
@@ -49,7 +49,7 @@ class LinearCosRadius(nn.Module):
         elif text_embeds.dim() == 3:
             text_embeds = text_embeds.permute(1, 0, 2)
 
-        print(f"After unsqueeze/repeat - text_embeds shape: {text_embeds.shape}")
+        # print(f"After unsqueeze/repeat - text_embeds shape: {text_embeds.shape}")
 
         sims = torch.matmul(text_embeds, video_embeds.permute(1, 0).unsqueeze(0))
         sims = torch.mean(sims, dim=1)

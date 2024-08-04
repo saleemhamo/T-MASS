@@ -116,9 +116,9 @@ def find_top_k_matches(config, query, model, tokenizer, video_features_cache, k=
                 aligned_text_features, _, _ = model.stochastic(text_features, video_data)
 
                 # Debug: print shapes before matrix multiplication
-                print(f"text_features shape: {text_features.shape}")
-                print(f"video_data shape: {video_data.shape}")
-                print(f"aligned_text_features shape: {aligned_text_features.shape}")
+                # print(f"text_features shape: {text_features.shape}")
+                # print(f"video_data shape: {video_data.shape}")
+                # print(f"aligned_text_features shape: {aligned_text_features.shape}")
 
                 # Ensure the dimensions are correct for matrix multiplication
                 video_data_mean = video_data.mean(dim=0)  # shape: [num_frames, embed_dim]
@@ -129,8 +129,8 @@ def find_top_k_matches(config, query, model, tokenizer, video_features_cache, k=
                 aligned_text_features_2d = aligned_text_features.squeeze(0)  # Ensure aligned_text_features is 2D
 
                 # Debug: print shapes before matrix multiplication
-                print(f"aligned_text_features_2d shape: {aligned_text_features_2d.shape}")
-                print(f"video_data_mean_2d shape: {video_data_mean_2d.shape}")
+                # print(f"aligned_text_features_2d shape: {aligned_text_features_2d.shape}")
+                # print(f"video_data_mean_2d shape: {video_data_mean_2d.shape}")
 
                 similarities = torch.matmul(aligned_text_features_2d, video_data_mean_2d.t())
 
