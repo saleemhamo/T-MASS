@@ -107,12 +107,18 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
                 for trial in range(config.stochasic_trials):
                     aligned_text_features, _, _ = model.stochastic(text_features, video_data)
 
-                    # Adjust this line to ensure the dimensions are correct for matrix multiplication
+                    # Ensure the dimensions are correct for matrix multiplication
                     video_data_mean = video_data.mean(dim=0)  # shape: [num_frames, embed_dim]
-                    video_data_mean_2d = video_data_mean.mean(dim=0).unsqueeze(0)  # shape: [1, embed_dim]
+                    if video_data_mean.dim() == 2:
+                        video_data_mean_2d = video_data_mean.mean(dim=0).unsqueeze(0)  # shape: [1, embed_dim]
+                    else:
+                        video_data_mean_2d = video_data_mean.unsqueeze(0)  # shape: [1, embed_dim]
                     aligned_text_features_2d = aligned_text_features.squeeze(0)  # Ensure aligned_text_features is 2D
 
                     similarities = torch.matmul(aligned_text_features_2d, video_data_mean_2d.t())
+
+                    if similarities.dim() == 1:
+                        similarities = similarities.unsqueeze(0)
 
                     available_k = min(k, similarities.shape[1])
                     top_scores, top_indices = similarities.topk(available_k, dim=1)
