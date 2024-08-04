@@ -107,7 +107,10 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
                 for trial in range(config.stochasic_trials):
                     aligned_text_features, _, _ = model.stochastic(text_features, video_data)
 
-                    similarities = torch.matmul(aligned_text_features, video_data.mean(dim=0).unsqueeze(0).t())
+                    # Adjust this line to ensure the dimensions are correct for matrix multiplication
+                    video_data_mean = video_data.mean(dim=0).unsqueeze(0)
+                    similarities = torch.matmul(aligned_text_features, video_data_mean.t())
+
                     available_k = min(k, similarities.shape[1])
                     top_scores, top_indices = similarities.topk(available_k, dim=1)
 
@@ -193,7 +196,7 @@ def main():
     test_data = pd.read_csv('data/MSRVTT/MSRVTT_JSFUSION_test.csv', names=['key', 'vid_key', 'video_id', 'sentence'],
                             skiprows=1)
 
-    # Evaluate model on test data with a limit of 2 records
+    # Evaluate model on test data with a limit of 20 records
     evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10, limit=20)
 
 
