@@ -51,7 +51,7 @@ class LinearCosRadius(nn.Module):
 
         print(f"After unsqueeze/repeat - text_embeds shape: {text_embeds.shape}")
 
-        sims = torch.matmul(text_embeds, video_embeds.permute(0, 2, 1))
+        sims = torch.matmul(text_embeds, video_embeds.permute(1, 0).unsqueeze(0))
         sims = torch.mean(sims, dim=1)
 
         # linear proj
