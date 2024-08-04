@@ -215,12 +215,13 @@ def main():
     # Load data
     data_loader = load_data(config)
 
+    # Cache video features
+    video_features_cache = cache_video_features(config, model, data_loader)
+    save_cache(video_features_cache, CACHE_FILE)
+
     # Load test data
     test_data = pd.read_csv('data/MSRVTT/MSRVTT_JSFUSION_test.csv', names=['key', 'vid_key', 'video_id', 'sentence'],
                             skiprows=1)
-
-    # Pre-cache video features
-    video_features_cache = cache_video_features(config, model, data_loader)
 
     # Evaluate model on test data with a limit of 20 records
     evaluate_model_on_test_data(config, model, tokenizer, test_data, video_features_cache, k=10, limit=20)
