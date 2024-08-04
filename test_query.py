@@ -224,7 +224,7 @@ def main():
                             skiprows=1)
 
     # Evaluate model on test data with a limit of 20 records
-    evaluate_model_on_test_data(config, model, tokenizer, test_data, video_features_cache, k=10, limit=20)
+    evaluate_model_on_test_data(config, model, tokenizer, test_data, video_features_cache, k=10)
 
 
 if __name__ == '__main__':
