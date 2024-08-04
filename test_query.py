@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 from config.all_config import AllConfig
 from datasets.model_transforms import init_transform_dict
 from stochastic_text_wrapper import StochasticTextWrapper
+from tqdm import tqdm  # For progress tracking
 
 # Setup logging
 import logging
@@ -17,6 +18,7 @@ logging.basicConfig(filename='evaluation.log', level=logging.INFO, format='%(asc
 logger = logging.getLogger()
 
 CACHE_FILE = 'video_features_cache.pkl'
+NUM_WORKERS = 24  # Set to 75% of available cores
 
 
 def load_model(config):
@@ -41,7 +43,7 @@ def load_model(config):
 
 def process_query(query, tokenizer):
     """Tokenize the text query."""
-    inputs = tokenizer(query, return_tensors="pt").to('cuda')
+    inputs = tokenizer(query, return_tensors="pt")
     return inputs
 
 
@@ -49,7 +51,7 @@ def load_data(config):
     """Load and preprocess the video data from MSR-VTT dataset."""
     img_transforms = init_transform_dict(config.input_res)
     dataset = MSRVTTDataset(config, split_type='test', img_transforms=img_transforms['clip_test'])
-    data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False, num_workers=config.num_workers)
+    data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False, num_workers=NUM_WORKERS)
     return data_loader
 
 
@@ -71,16 +73,16 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
     """Find the top-k matching videos for the given query."""
     text_inputs = process_query(query, tokenizer)
     text_features = model.clip.get_text_features(
-        input_ids=text_inputs['input_ids'],
-        attention_mask=text_inputs['attention_mask']
+        input_ids=text_inputs['input_ids'].cuda(),
+        attention_mask=text_inputs['attention_mask'].cuda()
     )
 
     video_scores = {}
 
     with torch.no_grad():
-        for batch in data_loader:
+        for batch in tqdm(data_loader, desc="Processing batches"):
             video_ids = batch['video_id']
-            video_features = batch['video'].to('cuda')
+            video_features = batch['video'].cuda()
 
             if video_features.dim() == 5:
                 batch_size, num_frames, channels, height, width = video_features.shape
@@ -101,7 +103,7 @@ def find_top_k_matches(config, query, model, tokenizer, data_loader, video_featu
                     video_data = video_features[idx].unsqueeze(0)
                     video_features_cache[video_id] = video_data.cpu()
                 else:
-                    video_data = video_features_cache[video_id].to('cuda')
+                    video_data = video_features_cache[video_id].cuda()
 
                 for trial in range(config.stochasic_trials):
                     aligned_text_features, _, _ = model.stochastic(text_features, video_data)
@@ -130,7 +132,7 @@ def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data
     ranks = []
     total_queries = len(test_data) if limit is None else limit
 
-    for i, (_, row) in enumerate(test_data.iterrows()):
+    for i, (_, row) in tqdm(enumerate(test_data.iterrows()), total=total_queries, desc="Evaluating queries"):
         if limit is not None and i >= limit:
             break
         query = row['sentence']
@@ -147,9 +149,8 @@ def evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data
         else:
             ranks.append(k + 1)
 
-        # Log progress
-        logger.info(f"Processed query {i + 1}/{total_queries}: {query}")
-        print(f"Processed query {i + 1}/{total_queries}: {query}")
+        if i % 10 == 0:  # Log progress every 10 queries
+            logger.info(f"Processed {i}/{total_queries} queries")
 
     recall_at_k = [correct / total_queries for correct in correct_at_k]
     median_rank = torch.median(torch.tensor(ranks, dtype=torch.float)).item()
@@ -190,11 +191,11 @@ def main():
     data_loader = load_data(config)
 
     # Load test data
-    test_data = pd.read_csv('data/MSRVTT/MSRVTT_JSFUSION_test.csv', header=None,
-                            names=['key', 'vid_key', 'video_id', 'sentence'], skiprows=1)
+    test_data = pd.read_csv('data/MSRVTT/MSRVTT_JSFUSION_test.csv', names=['key', 'vid_key', 'video_id', 'sentence'],
+                            skiprows=1)
 
-    # Evaluate model on test data with a limit of 2 records for testing
-    evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10)
+    # Evaluate model on test data with a limit of 2 records
+    evaluate_model_on_test_data(config, model, tokenizer, data_loader, test_data, k=10, limit=20)
 
 
 if __name__ == '__main__':
